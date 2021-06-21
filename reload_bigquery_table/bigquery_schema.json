@@ -1,0 +1,112 @@
+{
+    "schema": [
+        {
+            "name": "__CLASS_NAME",
+            "type": "STRING"
+        },
+        {
+            "name": "classification_nr",
+            "type": "INTEGER"
+        },
+        {
+            "name": "RUNTIME",
+            "type": "STRING"
+        },
+        {
+            "name": "__SUPPLIER_NAME",
+            "type": "STRING"
+        },
+        {
+            "name": "starttime",
+            "type": "TIMESTAMP"
+        },
+        {
+            "name": "__PRODUCTGROUP_ID",
+            "type": "INTEGER"
+        },
+        {
+            "name": "STATIONNUMBER",
+            "type": "INTEGER"
+        },
+        {
+            "name": "lot_number",
+            "type": "STRING"
+        },
+        {
+            "name": "hangposition",
+            "type": "INTEGER"
+        },
+        {
+            "name": "id",
+            "type": "STRING"
+        },
+        {
+            "name": "sum",
+            "type": "INTEGER"
+        },
+        {
+            "name": "GRADERID",
+            "type": "INTEGER"
+        },
+        {
+            "name": "parameter_id",
+            "type": "INTEGER"
+        },
+        {
+            "name": "Class",
+            "type": "INTEGER"
+        },
+        {
+            "name": "classification_products_pieces",
+            "type": "INTEGER"
+        },
+        {
+            "name": "lot_id",
+            "type": "INTEGER"
+        },
+        {
+            "name": "HANGERID",
+            "type": "STRING"
+        },
+        {
+            "name": "packageid",
+            "type": "INTEGER"
+        },
+        {
+            "name": "__PRODUCTGROUP_NAME",
+            "type": "STRING"
+        },
+        {
+            "name": "stddev",
+            "type": "INTEGER"
+        },
+        {
+            "name": "min",
+            "type": "INTEGER"
+        },
+        {
+            "name": "endtime",
+            "type": "TIMESTAMP"
+        },
+        {
+            "name": "STOPTIME",
+            "type": "STRING"
+        },
+        {
+            "name": "type",
+            "type": "STRING"
+        },
+        {
+            "name": "__LOT_NR",
+            "type": "STRING"
+        },
+        {
+            "name": "max",
+            "type": "INTEGER"
+        },
+        {
+            "name": "avg",
+            "type": "INTEGER"
+        }
+    ]
+}
