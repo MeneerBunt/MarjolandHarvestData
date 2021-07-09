@@ -1,0 +1,568 @@
+---
+title: "P17 - Marjoland roosgewicht"
+author: "Van Ginneken"
+
+date: "`r Sys.Date()`"
+
+output: 
+ html_document:
+    fig_caption: yes
+    number_sections: true
+    code_folding: hide
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+      
+---
+
+```{r setup, include=F}
+knitr::opts_chunk$set(warning=FALSE, message=FALSE)
+options(knitr.kable.NA = "")
+
+LoadPackages <- function(pkg){
+  new.pkg <- pkg[!(pkg %in% installed.packages()[, "Package"])]
+  if (length(new.pkg)) 
+    install.packages(new.pkg, dependencies = TRUE)
+  sapply(pkg, require, character.only = TRUE)
+}
+
+LoadPackages(c("readxl", "dplyr", "tidyr", "XML", "methods", "ggplot2", 
+               "ggpubr", "ggcorrplot", "e1071", "plotly", "tidytext", "plot3D"
+))
+set.seed(10)
+```
+
+# Data
+
+## Gewicht meting
+
+```{r gewicht meting}
+
+gewicht <- 
+  lapply(
+    list.files('./data/', full.names = T, pattern = ".csv"),
+    function(i){
+      read.csv(i, sep = ";") %>% 
+        select( sessie, lot.id, gr ) %>% 
+        mutate(across(-c("gr"), as.character),
+               gr = as.numeric(gsub(",", ".", gr)) ) 
+    }) %>% do.call(rbind, .) %>% 
+  filter(lot.id != 999)
+
+gewicht %>% 
+  filter(sessie != 3 ) %>% 
+  ggplot(aes(x = gr))+
+  geom_histogram(bins = 25)
+
+ggqqplot(gewicht$gr)
+shapiro.test(gewicht$gr)
+```
+
+
+## Sorteermachine
+
+
+```{r sorteerdata bron}
+files <- list.files('./data/aweta/', pattern = "history.xml", recursive = T, full.names = T)
+
+tb <- lapply(files, function(file){
+  s.name <- gsub("./data/aweta//|/history.xml", "", file)
+  result <- xmlParse(file = file)
+  xml_data <- xmlToList(result)
+  l <- xml_data$products
+  
+  lapply( 1:length(l), function(i){
+    p <- l[i]$product$parameters
+    
+    lapply(1:length(p), function(ii){
+      data.frame(
+        sessie = s.name,
+        id = i,
+        value = p[ii]$parameter$text,
+        var = p[ii]$parameter$.attrs )
+      
+    }) %>% do.call(rbind,.)
+    
+    
+  })%>% do.call(rbind,.) 
+  
+  
+}) %>% do.call(rbind,.) %>% 
+  
+  pivot_wider( names_from = var, values_from = value) %>% 
+  rename(
+    lot.id = '4',
+    Steellengte = '140',
+    knopbreedte = '114',
+    knophoogte = '113',
+    knoprijpheid = '118',
+    knopkleur = '117',
+    steeldikte = '141',
+    #kromming = '37',
+    Codeerbaan = '109'
+  ) %>% mutate(across(-c("sessie","lot.id"), as.numeric)) %>% 
+  separate(col = sessie, sep = " ", into = c("sessie", "ronde", "machine") ) %>% 
+  filter( !is.na(knophoogte), !is.na(Codeerbaan) ) %>%
+  mutate(
+    across(c("sessie", "ronde", "machine"), extract_numeric),
+    across(c("sessie", "ronde", "machine"), as.character),
+    
+  )
+```
+
+```{r plots}
+tb %>% group_by(sessie, machine, ronde) %>% summarise(n_distinct(lot.id))
+
+tb %>% 
+  mutate('knop' = knopbreedte / knophoogte,
+         'steel' = Steellengte / steeldikte,
+         "ratio" = knophoogte /  Steellengte) %>% 
+  gather("variable", "value", -machine, -sessie, -ronde, -lot.id) %>% 
+  filter( variable %in% c("knophoogte", "knopbreedte", "knopkleur", "knoprijpheid", "Steellengte", "steeldikte", "knop", "steel", "ratio")) %>% 
+  group_by(sessie, lot.id, machine, variable) %>% summarise(value = mean(value)) %>% 
+  mutate(machine = paste0("machine_", machine)) %>% 
+  spread(machine, value) %>% 
+  
+  filter(sessie == 3) %>% 
+  ggplot(aes(machine_2, machine_4 )) +
+  geom_point(alpha = 0.5) +
+  geom_smooth() +
+  facet_wrap(~variable, scales = "free")+
+  stat_cor( ) 
+
+tb %>%
+  gather("variable", "value", -machine, -sessie, -ronde, -lot.id) %>% 
+  
+  filter(sessie ==1 , variable %in% c("knophoogte", "knopbreedte", "knopkleur", "knoprijpheid", "Steellengte", "steeldikte")) %>% 
+  group_by(lot.id, variable) %>% 
+  summarise(
+    M = mean(value),
+    min = min(value),
+    max = max(value),
+    sd = sd(value),
+    D = max(value) - min(value),
+    P = round(  M / sd, 2)
+    
+  ) %>% 
+  arrange( P ) %>% 
+  
+  group_by(variable) %>% 
+  summarise(mean = mean(P))
+
+
+tb %>% 
+  gather("variable", "value", -sessie, -ronde, -lot.id, -machine) %>% 
+  filter(sessie ==1 , 
+         variable %in% c("knophoogte", "knopbreedte", "knopkleur", 
+                         "knoprijpheid", "Steellengte", "steeldikte")) %>%   
+  group_by(lot.id, variable, ) %>% 
+  mutate(
+    mean = mean(value),
+    sd = sd(value)
+  ) %>% 
+  ungroup() %>% 
+  mutate(lot.id = as.factor(lot.id)) %>% 
+  
+  ggplot( aes(x= reorder_within(lot.id, mean, desc(variable) ), y=value )) + 
+  #geom_smooth(method = lm) +
+  geom_point() + 
+  #geom_boxplot() + 
+  facet_wrap(~variable, scales = "free", ncol = 2) 
+
+tb %>% 
+  gather("variable", "value", -sessie, -ronde, -lot.id, -machine) %>%
+  filter(sessie == 3, ronde ==1 , 
+         variable %in% c("knophoogte", "knopbreedte", "knopkleur", 
+                         "knoprijpheid", "Steellengte", "steeldikte")) %>%   
+  
+  mutate(machine = paste0("machine_", machine) ) %>% 
+  spread(machine, value) %>% 
+  ggplot(aes(machine_2, machine_4 )) +
+  geom_point(alpha = 0.5) +
+  geom_smooth() +
+  facet_wrap(~variable, scales = "free")+
+  stat_cor( ) 
+
+
+lapply(
+  c("knophoogte", "knopbreedte", "knopkleur", 
+    "knoprijpheid", "Steellengte", "steeldikte"),
+  function(i){
+    fit <- tb %>% 
+      gather("variable", "value", -sessie, -ronde, -lot.id) %>%
+      filter(sessie ==1 , 
+             variable %in% c("knophoogte", "knopbreedte", "knopkleur", 
+                             "knoprijpheid", "Steellengte", "steeldikte")) %>%   
+      
+      filter(variable == i) %>% 
+      
+      mutate(ronde = paste0("ronde_", ronde)) %>% 
+      spread(ronde, value) %>% 
+      lm(ronde_1~ronde_2 + ronde_3 + ronde_4 + ronde_5, data = .)
+    
+    ii <-summary(fit)
+    data.frame(var = i, r2 = ii$r.squared )
+    
+  }) %>% do.call(rbind,.)
+
+```
+
+Variabele worden niet meegenomen indien:
+* geen continue schaal
+* geen variatie
+
+```{r}
+tb %>% 
+  gather("var", "value", -sessie, -ronde, -lot.id, -machine ) %>% 
+  ggplot(aes( x = value)) +
+  geom_histogram()+
+  
+  facet_wrap(~var, scales = "free")
+
+tb <- tb %>% select(-'0' , -'1', -'8', -'300', -'301', -'302', -'303', -Codeerbaan, -id)
+
+```
+
+```{r correlatie}
+corr <- round( cor( x = tb %>% select(-sessie, -ronde, -lot.id, -machine), use = "complete.obs" ), 1 )
+ggcorrplot( corr , method = "circle",hc.order = TRUE, type = "lower", outline.col = "white", lab = TRUE)
+
+```
+### verwijderde variabele
+
+#### 190
+
+```{r}
+plot(tb$Steellengte, tb$'190')
+tb <- tb %>% select(-'190')
+```
+
+#### 101
+
+```{r}
+plot(tb$Steellengte, tb$'101')
+tb <- tb %>% select(-'101')
+```
+
+#### 90
+
+```{r}
+plot(tb$Steellengte, tb$'90')
+tb <- tb %>% select(-'90')
+```
+
+# Voorspelling
+
+```{r voorspelling}
+data <- gewicht %>% inner_join( tb ) %>%
+  mutate(steel = steeldikte *Steellengte,
+         knop = knophoogte * knopbreedte)
+#rename(onb_1 = '101', onb_2 = '1113', onb_3 = '1114', onb_4 = '1117', onb_5 = '1118', onb_6 = '1141',  
+#       onb_7 = '190', onb_8 = '90' )
+
+data %>% gather("variable", "value", -sessie, -lot.id, -gr, -ronde, -machine) %>% 
+  ggplot(aes(gr, value, col = gr )) +
+  geom_point()+
+  geom_smooth() +
+  geom_point(alpha = 0.05) +
+  facet_wrap(~variable, scales = "free")# %>%  stat_cor( ) 
+
+data %>% gather("variable", "value", -sessie, -lot.id, -gr, -ronde, -machine) %>% 
+  filter(variable %in% c("steeldikte", "Steellengte", "knophoogte", "knopbreedte" )  ) %>% 
+  ggplot(aes(gr, value )) +
+  geom_point()+
+  geom_smooth() +
+  geom_point(alpha = 0.05) +
+  facet_wrap(~variable, scales = "free")# %>%  stat_cor( ) 
+
+```
+# train
+
+```{r, eval = F }
+plot_ly(x = data$steeldikte, y = data$Steellengte, z = data$knophoogte, color = data$gr)
+```
+
+```{r train}
+
+data.model <- data %>% filter( !is.na(Steellengte) ) %>% #, gr < 70, gr > 30 )# & ronde == 1) 
+  mutate(id = paste(sessie, lot.id, sep = "_"))
+
+train <- data.model %>% filter(sessie == 1)
+test <- data.model %>% filter(sessie != 1)
+
+tune = tune(svm,gr~ knopbreedte + Steellengte + steeldikte + knophoogte + #machine +
+              steel + knop
+            #onb_1 +onb_2+onb_3+onb_4+onb_5+onb_6+onb_7+onb_8
+            
+            ,
+            data =  train, kernal = "linear",
+            ranges = list(cost = c(0.1, 1,10, 15, 50 )) )
+
+tune$best.model
+
+```
+
+```{r rf}
+out <- lapply(unique(data.model$id), function(i){
+  #set.seed(10)
+  train_ind <- sample(seq_len(nrow(data.model)), size = nrow(data.model) * 0.7 )
+  train <- data.model[train_ind, ]
+  test <- data.model[-train_ind, ]
+  
+  train <- data.model %>% filter(id != i)#[train_ind, ]
+  test <- data.model%>% filter(id == i)#[-train_ind, ]
+  
+  rf <- randomForest(gr ~ ., data = train[,c("knophoogte", "knopbreedte", "steeldikte","Steellengte","gr" ) ], mtry = 3,
+                     importance = TRUE, na.action = na.omit)
+  
+  
+  predYsvm = predict(rf, test )
+  
+  
+  data.frame(sessie.id = test$sessie, lot.id = test$lot.id, measure = test$gr, predict = predYsvm) 
+  
+}) %>% do.call(rbind, .)
+
+
+out %>% ggplot( aes(measure, predict)) +
+  geom_smooth(method = lm) +
+  geom_point(alpha = 0.5) +
+  stat_cor()
+
+out %>% mutate(
+  measure.group = round(measure/5)*5) %>% 
+  group_by( measure.group ) %>% 
+  mutate(predict.mean = mean(predict)) %>% 
+  ggplot(aes(measure.group, predict.mean )) +
+  geom_line() +
+  geom_point(aes(y = predict))
+
+
+
+out.sum <- out %>% group_by(sessie.id, lot.id) %>% 
+  summarise(measure = mean(measure), 
+            predict = mean(predict),
+            sd = sd(predict, na.rm = T)) %>% 
+  mutate(dif = abs( measure - predict ) /  measure )
+
+measure <- round((sum(out.sum$measure))/1000,2)
+predict <- round((sum(out.sum$predict))/1000,2)
+perc <- round( predict / measure * 100 )
+
+out.sum %>% 
+  ggplot( aes(measure, predict )) +
+  geom_smooth(method = lm) +
+  geom_point(alpha = 0.5) +
+  stat_cor() + 
+  #facet_wrap(~sessie.id, scales = "free") +
+  labs(title = "Voorspelling gewicht rozen ", 
+       subtitle = paste("measure: ", measure, "predict: ", predict, "perc: ", perc, "%" )  )
+
+```
+
+
+```{r svm}
+out <- lapply(unique(data.model$id), function(i){
+  #set.seed(10)
+  train_ind <- sample(seq_len(nrow(data.model)), size = nrow(data.model) * 0.7 )
+  train <- data.model[train_ind, ]
+  test <- data.model[-train_ind, ]
+  
+  train <- data.model %>% filter(id != i)#[train_ind, ]
+  test <- data.model%>% filter(id == i)#[-train_ind, ]
+  
+  modelsvm = svm(formula =  gr~knopbreedte + Steellengte + steeldikte + knophoogte + 
+                   steel + knop
+                 #onb_1 +onb_2+onb_3+onb_4+onb_5+onb_6+onb_7+onb_8
+                 ,
+                 data =  train, cost = 1, kernel = "linear")
+  predYsvm = predict(modelsvm, test )
+  
+  
+  data.frame(sessie.id = test$sessie, lot.id = test$lot.id, measure = test$gr, predict = predYsvm) 
+  
+}) %>% do.call(rbind, .)
+
+out %>% ggplot( aes(measure, predict)) +
+  geom_smooth(method = lm) +
+  geom_point(alpha = 0.5) +
+  stat_cor()
+
+out %>% mutate(
+  measure.group = round(measure/5)*5) %>% 
+  group_by( measure.group ) %>% 
+  mutate(predict.mean = mean(predict)) %>% 
+  ggplot(aes(measure.group, predict.mean )) +
+  geom_line() +
+  geom_point(aes(y = predict))
+
+
+out.sum <- out %>% group_by(sessie.id, lot.id) %>% 
+  summarise(measure = mean(measure), 
+            predict = mean(predict),
+            sd = sd(predict, na.rm = T)) %>% 
+  mutate(dif = abs( measure - predict ) /  measure )
+
+measure <- round((sum(out.sum$measure))/1000,2)
+predict <- round((sum(out.sum$predict))/1000,2)
+perc <- round( predict / measure * 100 )
+
+out.sum %>% 
+  ggplot( aes(measure, predict )) +
+  geom_smooth(method = lm) +
+  geom_point(alpha = 0.5) +
+  stat_cor() + 
+  #facet_wrap(~sessie.id, scales = "free") +
+  labs(title = "Voorspelling gewicht rozen ", 
+       subtitle = paste("measure: ", measure, "predict: ", predict, "perc: ", perc, "%" )  )
+
+```
+
+
+```{r}
+fout <- out.sum$lot.id[out.sum$dif > 0.2]
+
+data.model <- data.model[!data.model$lot.id %in% fout, ]
+out <- lapply(unique(data.model$id), function(i){
+  #set.seed(10)
+  train_ind <- sample(seq_len(nrow(data.model)), size = nrow(data.model) * 0.7 )
+  train <- data.model[train_ind, ]
+  test <- data.model[-train_ind, ]
+  
+  train <- data.model %>% filter(id != i)#[train_ind, ]
+  test <- data.model%>% filter(id == i)#[-train_ind, ]
+  
+  modelsvm = svm(formula =  gr~knopbreedte + Steellengte + steeldikte + knophoogte +
+                   steel + knop
+                 #onb_1 +onb_2+onb_3+onb_4+onb_5+onb_6+onb_7+onb_8
+                 ,
+                 data =  train, cost = 10, kernel = "linear")
+  predYsvm = predict(modelsvm, test )
+  
+  
+  data.frame(sessie.id = test$sessie, lot.id = test$lot.id, measure = test$gr, predict = predYsvm) 
+  
+}) %>% do.call(rbind, .)
+
+out %>% ggplot( aes(measure, predict)) +
+  geom_smooth(method = lm) +
+  geom_point(alpha = 0.5) +
+  stat_cor()
+
+
+```
+
+
+```{r}
+
+final.modelsvm = svm(formula =  gr~knopbreedte + Steellengte + steeldikte + knophoogte,
+                     data =  data.model, cost = 10, kernel = "linear")
+
+print(final.modelsvm)
+
+sum <- data.model %>% select(knophoogte, knopbreedte, Steellengte, steeldikte) %>% 
+  gather("var", "value" ) %>% 
+  group_by(var) %>% 
+  summarise(min = min( value ),
+            av =  mean(value),
+            max = max( value ) ) 
+
+data.frame( 
+  knopbreedte = sum$min[sum$var == "knopbreedte"]:sum$max[sum$var == "knopbreedte"], 
+  knophoogte = sum$av[sum$var == "knophoogte"], 
+  steeldikte = sum$av[sum$var == "steeldikte"], 
+  Steellengte = sum$av[sum$var == "Steellengte"] ) %>% 
+  predict(final.modelsvm, . ) %>% 
+  plot(sum$min[sum$var == "knopbreedte"]:sum$max[sum$var == "knopbreedte"], .)
+
+
+data.frame( 
+  knophoogte = sum$min[sum$var == "knophoogte"]:sum$max[sum$var == "knophoogte"], 
+  knopbreedte = sum$av[sum$var == "knopbreedte"], 
+  steeldikte = sum$av[sum$var == "steeldikte"], 
+  Steellengte = sum$av[sum$var == "Steellengte"] ) %>% 
+  predict(final.modelsvm, . ) %>% 
+  plot(.)
+
+data.frame( 
+  steeldikte = sum$min[sum$var == "steeldikte"]:sum$max[sum$var == "steeldikte"], 
+  knophoogte = sum$av[sum$var == "knophoogte"], 
+  knopbreedte = sum$av[sum$var == "knopbreedte"], 
+  Steellengte = sum$av[sum$var == "Steellengte"] ) %>% 
+  predict(final.modelsvm, . ) %>% 
+  plot(.)
+
+data.frame( 
+  knopbreedte = sum$av[sum$var == "knopbreedte"], 
+  knophoogte = sum$av[sum$var == "knophoogte"], 
+  Steellengte = sum$min[sum$var == "Steellengte"]:sum$max[sum$var == "Steellengte"], 
+  steeldikte = sum$av[sum$var == "steeldikte"] ) %>% 
+  predict(final.modelsvm, . ) %>% 
+  plot(.)
+
+data.out <- rbind(
+  knopbreedte, knophoogte, steeldikte, Steellengte
+)
+
+
+predYsvm = predict(final.modelsvm, data.out )
+data.out[["gr"]] <-  predYsvm 
+data.out %>% 
+  gather("var", "value", - gr) %>% 
+  ggplot(aes( value, gr ))+
+  geom_point() +
+  facet_wrap(~var, scales = "free")
+
+
+#pairs(data.out)
+
+scatter3D(data.out$steeldikte, data.out$Steellengte, data.out$knophoogte, clab = c("gr", "Width (cm)"))
+plot_ly(x = data.out$knopbreedte, y = data.out$Steellengte, z = data.out$knophoogte, color = data.out$gr)
+
+```
+
+```{r}
+
+rf <- randomForest(gr ~ ., data = data.model[,c("knophoogte", "knopbreedte", "steeldikte","Steellengte","gr" ) ], mtry = 3,
+                   importance = TRUE, na.action = na.omit)
+
+# Print regression model
+print(rf)
+
+# Output to be present as PNG file
+png(file = "randomForestRegression.png")
+
+# Plot the error vs the number of trees graph
+plot(ozone.rf)
+
+data.frame( 
+  knopbreedte = sum$min[sum$var == "knopbreedte"]:sum$max[sum$var == "knopbreedte"], 
+  knophoogte = sum$av[sum$var == "knophoogte"], 
+  steeldikte = sum$av[sum$var == "steeldikte"], 
+  Steellengte = sum$av[sum$var == "Steellengte"] ) %>% 
+  predict(rf, . ) %>% 
+  plot(sum$min[sum$var == "knopbreedte"]:sum$max[sum$var == "knopbreedte"], .)
+
+data.frame( 
+  knophoogte = sum$min[sum$var == "knophoogte"]:sum$max[sum$var == "knophoogte"], 
+  knopbreedte = sum$av[sum$var == "knopbreedte"], 
+  steeldikte = sum$av[sum$var == "steeldikte"], 
+  Steellengte = sum$av[sum$var == "Steellengte"] ) %>% 
+  predict(rf, . )%>% plot()
+
+data.frame( 
+  steeldikte = sum$min[sum$var == "steeldikte"]:sum$max[sum$var == "steeldikte"], 
+  knophoogte = sum$av[sum$var == "knophoogte"], 
+  knopbreedte = sum$av[sum$var == "knopbreedte"], 
+  Steellengte = sum$av[sum$var == "Steellengte"] ) %>% 
+  predict(rf, . )%>% plot()
+
+data.frame( 
+  knopbreedte = sum$av[sum$var == "knopbreedte"], 
+  knophoogte = sum$av[sum$var == "knophoogte"], 
+  Steellengte = sum$min[sum$var == "Steellengte"]:sum$max[sum$var == "Steellengte"], 
+  steeldikte = sum$av[sum$var == "steeldikte"] ) %>% 
+  predict(rf, . ) %>% plot()
+
+```
